@@ -4,22 +4,46 @@ import requests
 from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
+import re
 
 # ---------------------------------------------------------
 # CONFIGURACIÓN DE PÁGINA Y ESTILOS
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="Gestión Financiera Personal",
+    page_title="Control Financiero",
     page_icon="💰",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Estilo visual adaptado para uso ágil en celular
+# Estilo personalizado para arreglar contraste de tarjetas en tema oscuro
 st.markdown("""
     <style>
-    .stMetric { background-color: #f8f9fa; padding: 12px; border-radius: 8px; border: 1px solid #e9ecef; }
-    .stButton>button { width: 100%; border-radius: 8px; height: 3em; font-weight: bold; }
+    /* Estilo de Tarjetas Métricas */
+    div[data-testid="stMetric"] {
+        background-color: #1E293B !important;
+        border: 1px solid #334155 !important;
+        padding: 15px !important;
+        border-radius: 10px !important;
+    }
+    div[data-testid="stMetricLabel"] > label {
+        color: #94A3B8 !important;
+        font-size: 0.95rem !important;
+        font-weight: 600 !important;
+    }
+    div[data-testid="stMetricValue"] > div {
+        color: #F8FAFC !important;
+        font-size: 1.6rem !important;
+        font-weight: 700 !important;
+    }
+    .stButton>button {
+        width: 100%;
+        border-radius: 8px;
+        height: 3em;
+        font-weight: bold;
+        background-color: #10B981 !important;
+        color: white !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -28,11 +52,10 @@ st.markdown("""
 # ---------------------------------------------------------
 @st.cache_resource
 def conectar_google_sheets():
-    # Carga credenciales desde st.secrets o archivo local
     scopes = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
-]
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
     credentials = Credentials.from_service_account_info(
         st.secrets["gcp_service_account"],
         scopes=scopes
@@ -43,16 +66,14 @@ def conectar_google_sheets():
 
 @st.cache_data(ttl=1800)
 def obtener_tc_oficial():
-    """Consulta la cotización oficial del dólar en tiempo real vía DolarApi"""
     try:
         res = requests.get("https://dolarapi.com/v1/dolares/oficial", timeout=5)
         if res.status_code == 200:
             return float(res.json().get("venta", 0.0))
     except Exception:
         pass
-    return 1570.0  # valor por defecto si falla la API
+    return 1570.0
 
-# Inicializar conexión
 try:
     doc = conectar_google_sheets()
     sheet_mov = doc.worksheet("Movimientos")
@@ -63,54 +84,59 @@ except Exception as e:
     st.error(f"Error al conectar con Google Sheets: {e}")
 
 # ---------------------------------------------------------
-# OPCIONES DE LISTAS DESPLEGABLES
+# LISTAS DE CONFIGURACIÓN
 # ---------------------------------------------------------
 RUBROS_GASTOS = [
-    "Bancos (prestamos, tarjetas de credito)",
-    "Auto",
-    "Casa",
-    "Comidas",
-    "Gimnasio",
-    "Mascotas",
-    "Belleza",
-    "Entretenimiento/Ocio",
-    "Ropa y accesorios",
-    "Salud",
-    "Suscripciones",
-    "Gastos Varios",
-    "Regalos"
-]
-RUBROS_INGRESOS = [
-    "Sueldo",
-    "Honorarios",
-    "Cursos/Capacitaciones",
-    "Comisiones",
-    "Productos Millanel",
-    "Ventas",
-    "Otros Ingresos"
-]
-RUBROS_INVERSION = [
-    "Ahorro",
-    "Fondo de Emergencia",
-    "Inversiones",
-    "Seguro de retiro",
+    "Bancos (prestamos, tarjetas de credito)", "Auto", "Casa", "Comidas",
+    "Gimnasio", "Mascotas", "Belleza", "Entretenimiento/Ocio",
+    "Ropa y accesorios", "Salud", "Suscripciones", "Gastos Varios", "Regalos"
 ]
 
-RUBROS_INGRESOS = ["Sueldo", "Honorarios", "Cursos/Capacitaciones", "Comisiones", "Otros Ingresos"]
-RUBROS_INVERSION = ["Ahorro Reserva", "Inversión MEP/CEDEARs", "Fondo de Emergencia", "Seguro de Retiro"]
+RUBROS_INGRESOS = [
+    "Sueldo", "Honorarios", "Cursos/Capacitaciones", "Comisiones",
+    "Productos Millanel", "Deposito abue", "Ahorros mes anterior", "Otros Ingresos"
+]
+
+RUBROS_INVERSION = [
+    "Ahorro Reserva", "Inversión MEP/CEDEARs", "Fondo de Emergencia", "Seguro de Retiro"
+]
+
 CAJAS_DISPONIBLES = ["Banco Macro", "MercadoPago", "Banco Santa Fe", "Efectivo", "Broker / Inversiones"]
 
 # ---------------------------------------------------------
-# LECTURA Y PROCESAMIENTO DE DATOS
+# LIMPIEZA DE DATOS (CONVERSIÓN DE CADENAS A NÚMEROS)
 # ---------------------------------------------------------
+def limpiar_monto(val):
+    if isinstance(val, (int, float)):
+        return float(val)
+    if not val:
+        return 0.0
+    val_str = str(val).replace("$", "").replace("U$S", "").replace(" ", "").strip()
+    # Caso 1.234,56
+    if "." in val_str and "," in val_str:
+        val_str = val_str.replace(".", "").replace(",", ".")
+    elif "," in val_str:
+        val_str = val_str.replace(",", ".")
+    try:
+        return float(val_str)
+    except ValueError:
+        return 0.0
+
 def cargar_datos():
-    df_mov = pd.DataFrame(sheet_mov.get_all_records())
-    df_cajas = pd.DataFrame(sheet_cajas.get_all_records())
+    raw_mov = sheet_mov.get_all_records()
+    raw_cajas = sheet_cajas.get_all_records()
+    
+    df_mov = pd.DataFrame(raw_mov)
+    df_cajas = pd.DataFrame(raw_cajas)
     
     if not df_mov.empty:
-        df_mov["Fecha"] = pd.to_datetime(df_mov["Fecha"])
-        df_mov["Monto_ARS"] = pd.to_numeric(df_mov["Monto_ARS"], errors='coerce').fillna(0.0)
-        df_mov["Monto_USD"] = pd.to_numeric(df_mov["Monto_USD"], errors='coerce').fillna(0.0)
+        df_mov["Fecha"] = pd.to_datetime(df_mov["Fecha"], errors='coerce')
+        df_mov["Monto_ARS"] = df_mov["Monto_ARS"].apply(limpiar_monto)
+        df_mov["Monto_USD"] = df_mov["Monto_USD"].apply(limpiar_monto)
+        df_mov["Caja_Origen"] = df_mov["Caja_Origen"].astype(str).str.strip()
+        df_mov["Caja_Destino"] = df_mov["Caja_Destino"].astype(str).str.strip()
+        df_mov["Tipo"] = df_mov["Tipo"].astype(str).str.strip()
+        
     return df_mov, df_cajas
 
 if conexion_ok:
@@ -132,20 +158,16 @@ tab_carga, tab_dashboard, tab_cajas = st.tabs(["📝 Cargar Movimiento", "📊 D
 with tab_carga:
     st.subheader("Registrar Operación")
     
-    tc_actual = obtener_tc_oficial()
-    st.info(f"💵 **Tipo de Cambio Oficial Hoy (Venta):** ${tc_actual:,.2f}")
+    tc_defecto = obtener_tc_oficial()
     
     with st.form("form_registro", clear_on_submit=True):
         col1, col2 = st.columns(2)
         
         with col1:
-            id_mov = st.text_input("ID Movimiento (opcional/libre tipeo)", value=datetime.now().strftime("%Y%m%d%H%M%S"))
+            id_mov = st.text_input("ID Movimiento (libre tipeo)", value=datetime.now().strftime("%Y%m%d%H%M%S"))
             fecha_op = st.date_input("Fecha", value=datetime.today())
             tipo_op = st.selectbox("Tipo de Movimiento", ["Gasto", "Ingreso", "Transferencia", "Ahorro / Inversión"])
-        
-        # Tipo de Cambio del día por defecto, pero completamente editable por vos:
-        tc_defecto = obtener_tc_oficial()
-        tc_aplicado = st.number_input("Tipo de Cambio Oficial (Editable)", value=tc_defecto, step=1.0, format="%.2f")
+            tc_aplicado = st.number_input("Tipo de Cambio Oficial (Editable)", value=tc_defecto, step=1.0, format="%.2f")
         
         with col2:
             if tipo_op == "Transferencia":
@@ -165,12 +187,12 @@ with tab_carga:
                 caja_destino = "-"
                 rubro_op = st.selectbox("Rubro", RUBROS_GASTOS)
 
-            concepto_op = st.text_input("Concepto / Detalle", placeholder="Ej. Compras supermercado")
+            concepto_op = st.text_input("Concepto / Detalle", placeholder="Ej. Cobro honorarios / Supermercado")
 
         monto_ars = st.number_input("Monto en Pesos ($)", min_value=0.0, step=100.0, format="%.2f")
         monto_usd = round(monto_ars / tc_aplicado, 2) if tc_aplicado > 0 else 0.0
         
-        st.caption(f"Equivalente en USD al guardar (TC ${tc_aplicado:,.2f}): **US$ {monto_usd:,.2f}**")
+        st.caption(f"Equivalente en USD: **US$ {monto_usd:,.2f}** (TC ${tc_aplicado:,.2f})")
         
         btn_guardar = st.form_submit_button("💾 Guardar Movimiento")
 
@@ -178,6 +200,7 @@ with tab_carga:
         if monto_ars <= 0:
             st.warning("El monto debe ser mayor a cero.")
         else:
+            # Se guarda el valor numérico limpio en la planilla
             nueva_fila = [
                 str(id_mov),
                 fecha_op.strftime("%Y-%m-%d"),
@@ -186,85 +209,89 @@ with tab_carga:
                 caja_destino,
                 rubro_op,
                 concepto_op,
-                monto_ars,
-                tc_actual,
-                monto_usd
+                float(monto_ars),
+                float(tc_aplicado),
+                float(monto_usd)
             ]
             sheet_mov.append_row(nueva_fila)
-            st.success("¡Movimiento registrado con éxito en Google Sheets!")
+            st.success("¡Movimiento registrado con éxito!")
             st.cache_data.clear()
             st.rerun()
 
 # ---------------------------------------------------------
-# TAB 2: DASHBOARD Y BALANCES MENSUALES
+# TAB 2: DASHBOARD MENSUAL
 # ---------------------------------------------------------
 with tab_dashboard:
     if not df_movimientos.empty:
         st.subheader("Filtros de Análisis")
         
         df_movimientos["Mes_Año"] = df_movimientos["Fecha"].dt.strftime("%Y-%m")
-        meses_disponibles = sorted(df_movimientos["Mes_Año"].unique(), reverse=True)
-        mes_sel = st.selectbox("Seleccionar Mes", meses_disponibles, index=0)
+        meses_disponibles = sorted([m for m in df_movimientos["Mes_Año"].dropna().unique()], reverse=True)
         
-        df_mes = df_movimientos[df_movimientos["Mes_Año"] == mes_sel]
-        
-        tot_ingresos = df_mes[df_mes["Tipo"] == "Ingreso"]["Monto_ARS"].sum()
-        tot_gastos = df_mes[df_mes["Tipo"] == "Gasto"]["Monto_ARS"].sum()
-        tot_ahorros = df_mes[df_mes["Tipo"] == "Ahorro / Inversión"]["Monto_ARS"].sum()
-        balance_neto = tot_ingresos - tot_gastos
-        
-        col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-        col_m1.metric("Ingresos Totales", f"${tot_ingresos:,.2f}")
-        col_m2.metric("Gastos Totales", f"${tot_gastos:,.2f}")
-        col_m3.metric("Resultado Neto", f"${balance_neto:,.2f}", delta=f"{balance_neto:,.2f}")
-        col_m4.metric("Ahorros e Inversiones", f"${tot_ahorros:,.2f}")
-        
-        st.divider()
-        st.subheader("Desglose de Gastos por Rubro")
-        df_gastos_rubro = df_mes[df_mes["Tipo"] == "Gasto"].groupby("Rubro")["Monto_ARS"].sum().reset_index()
-        st.dataframe(df_gastos_rubro.sort_values(by="Monto_ARS", ascending=False), use_container_width=True)
+        if meses_disponibles:
+            mes_sel = st.selectbox("Seleccionar Mes", meses_disponibles, index=0)
+            df_mes = df_movimientos[df_movimientos["Mes_Año"] == mes_sel]
+            
+            tot_ingresos = df_mes[df_mes["Tipo"] == "Ingreso"]["Monto_ARS"].sum()
+            tot_gastos = df_mes[df_mes["Tipo"] == "Gasto"]["Monto_ARS"].sum()
+            tot_ahorros = df_mes[df_mes["Tipo"] == "Ahorro / Inversión"]["Monto_ARS"].sum()
+            balance_neto = tot_ingresos - tot_gastos
+            
+            col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+            col_m1.metric("Ingresos Totales", f"${tot_ingresos:,.2f}")
+            col_m2.metric("Gastos Totales", f"${tot_gastos:,.2f}")
+            col_m3.metric("Resultado Neto", f"${balance_neto:,.2f}")
+            col_m4.metric("Ahorros e Inversiones", f"${tot_ahorros:,.2f}")
+            
+            st.divider()
+            st.subheader("Desglose de Gastos por Rubro")
+            df_gastos_rubro = df_mes[df_mes["Tipo"] == "Gasto"].groupby("Rubro")["Monto_ARS"].sum().reset_index()
+            if not df_gastos_rubro.empty:
+                df_gastos_rubro["Monto Formateado"] = df_gastos_rubro["Monto_ARS"].apply(lambda x: f"${x:,.2f}")
+                st.dataframe(df_gastos_rubro[["Rubro", "Monto Formateado"]].sort_values(by="Rubro"), use_container_width=True)
+            else:
+                st.info("No hay gastos registrados en este mes.")
     else:
         st.info("No hay movimientos registrados para mostrar métricas.")
 
 # ---------------------------------------------------------
-# TAB 3: SALDOS REALES POR CAJA Y TRANSFERENCIAS
+# TAB 3: SALDOS POR CAJA
 # ---------------------------------------------------------
 with tab_cajas:
     st.subheader("Estado de Cuentas y Disponibilidades")
     
     saldos_dict = {c: 0.0 for c in CAJAS_DISPONIBLES}
     
-    # Cargar saldos iniciales desde Google Sheets
-    if not df_saldos_base.empty:
+    if not df_saldos_base.empty and "Caja" in df_saldos_base.columns:
         for _, r in df_saldos_base.iterrows():
-            if r["Caja"] in saldos_dict:
-                saldos_dict[r["Caja"]] = float(r.get("Saldo_Inicial", 0.0))
+            caja_nombre = str(r.get("Caja", "")).strip()
+            if caja_nombre in saldos_dict:
+                saldos_dict[caja_nombre] = limpiar_monto(r.get("Saldo_Inicial", 0.0))
                 
-    # Procesar la suma/resta de cada movimiento
     if not df_movimientos.empty:
         for _, row in df_movimientos.iterrows():
-            tipo = row["Tipo"]
-            c_orig = row["Caja_Origen"]
-            c_dest = row["Caja_Destino"]
-            monto = float(row["Monto_ARS"])
+            tipo = str(row.get("Tipo", "")).strip()
+            c_orig = str(row.get("Caja_Origen", "")).strip()
+            c_dest = str(row.get("Caja_Destino", "")).strip()
+            monto = float(row.get("Monto_ARS", 0.0))
             
             if tipo == "Ingreso" and c_dest in saldos_dict:
                 saldos_dict[c_dest] += monto
             elif tipo == "Gasto" and c_orig in saldos_dict:
                 saldos_dict[c_orig] -= monto
-            elif tipo == "Ahorro / Inversión":
-                if c_orig in saldos_dict:
-                    saldos_dict[c_orig] -= monto
-                if c_dest in saldos_dict:
-                    saldos_dict[c_dest] += monto
-            elif tipo == "Transferencia":
+            elif tipo in ["Ahorro / Inversión", "Transferencia"]:
                 if c_orig in saldos_dict:
                     saldos_dict[c_orig] -= monto
                 if c_dest in saldos_dict:
                     saldos_dict[c_dest] += monto
 
+    tc_ref = obtener_tc_oficial()
     df_resumen_cajas = pd.DataFrame([
-        {"Caja / Cuenta": caja, "Saldo Actual ARS": monto, "Saldo Aprox USD": round(monto / obtener_tc_oficial(), 2)}
+        {
+            "Caja / Cuenta": caja,
+            "Saldo Actual ARS": f"${monto:,.2f}",
+            "Saldo Aprox USD": f"US$ {round(monto / tc_ref, 2):,.2f}" if tc_ref > 0 else "US$ 0.00"
+        }
         for caja, monto in saldos_dict.items()
     ])
     
