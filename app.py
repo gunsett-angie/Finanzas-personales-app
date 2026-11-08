@@ -153,12 +153,21 @@ st.title("💰 Control Financiero")
 tab_carga, tab_dashboard, tab_cajas = st.tabs(["📝 Cargar Movimiento", "📊 Dashboard Mensual", "🏦 Saldos por Caja"])
 
 # ---------------------------------------------------------
-# TAB 1: FORMULARIO DE CARGA
+# TAB 1: FORMULARIO DE CARGA DINÁMICO
 # ---------------------------------------------------------
 with tab_carga:
     st.subheader("Registrar Operación")
     
     tc_defecto = obtener_tc_oficial()
+    
+    # 1. Selección de Tipo fuera de columnas rígidas para actualizar desplegables al instante
+    tipo_op = st.radio(
+        "Tipo de Movimiento", 
+        ["Gasto", "Ingreso", "Transferencia", "Ahorro / Inversión"], 
+        horizontal=True
+    )
+    
+    st.divider()
     
     with st.form("form_registro", clear_on_submit=True):
         col1, col2 = st.columns(2)
@@ -166,26 +175,28 @@ with tab_carga:
         with col1:
             id_mov = st.text_input("ID Movimiento (libre tipeo)", value=datetime.now().strftime("%Y%m%d%H%M%S"))
             fecha_op = st.date_input("Fecha", value=datetime.today())
-            tipo_op = st.selectbox("Tipo de Movimiento", ["Gasto", "Ingreso", "Transferencia", "Ahorro / Inversión"])
             tc_aplicado = st.number_input("Tipo de Cambio Oficial (Editable)", value=tc_defecto, step=1.0, format="%.2f")
-        
-        with col2:
+            
             if tipo_op == "Transferencia":
                 caja_origen = st.selectbox("Caja Origen (Resta)", CAJAS_DISPONIBLES)
-                caja_destino = st.selectbox("Caja Destino (Suma)", [c for c in CAJAS_DISPONIBLES if c != caja_origen])
-                rubro_op = "Transferencia entre Cuentas"
             elif tipo_op == "Ingreso":
                 caja_origen = "-"
-                caja_destino = st.selectbox("Caja Ingreso", CAJAS_DISPONIBLES)
-                rubro_op = st.selectbox("Rubro", RUBROS_INGRESOS)
+            else:
+                caja_origen = st.selectbox("Caja de Origen / Pago", CAJAS_DISPONIBLES)
+
+        with col2:
+            if tipo_op == "Ingreso":
+                rubro_op = st.selectbox("Rubro de Ingreso", RUBROS_INGRESOS)
+                caja_destino = st.selectbox("Caja de Destino (Ingreso)", CAJAS_DISPONIBLES)
             elif tipo_op == "Ahorro / Inversión":
-                caja_origen = st.selectbox("Caja Origen", CAJAS_DISPONIBLES)
-                caja_destino = st.selectbox("Destino Inversión", ["Broker / Inversiones", "MercadoPago Reserva"])
-                rubro_op = st.selectbox("Rubro", RUBROS_INVERSION)
+                rubro_op = st.selectbox("Rubro de Inversión / Ahorro", RUBROS_INVERSION)
+                caja_destino = st.selectbox("Destino de Inversión", ["Broker / Inversiones", "MercadoPago Reserva", "Efectivo"])
+            elif tipo_op == "Transferencia":
+                rubro_op = "Transferencia entre Cuentas"
+                caja_destino = st.selectbox("Caja Destino (Suma)", [c for c in CAJAS_DISPONIBLES if c != caja_origen])
             else:  # Gasto
-                caja_origen = st.selectbox("Caja de Pago", CAJAS_DISPONIBLES)
+                rubro_op = st.selectbox("Rubro de Gasto", RUBROS_GASTOS)
                 caja_destino = "-"
-                rubro_op = st.selectbox("Rubro", RUBROS_GASTOS)
 
             concepto_op = st.text_input("Concepto / Detalle", placeholder="Ej. Cobro honorarios / Supermercado")
 
@@ -200,7 +211,6 @@ with tab_carga:
         if monto_ars <= 0:
             st.warning("El monto debe ser mayor a cero.")
         else:
-            # Se guarda el valor numérico limpio en la planilla
             nueva_fila = [
                 str(id_mov),
                 fecha_op.strftime("%Y-%m-%d"),
@@ -214,7 +224,7 @@ with tab_carga:
                 float(monto_usd)
             ]
             sheet_mov.append_row(nueva_fila)
-            st.success("¡Movimiento registrado con éxito!")
+            st.success("¡Movimiento registrado correctamente!")
             st.cache_data.clear()
             st.rerun()
 
