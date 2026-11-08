@@ -4,7 +4,6 @@ import requests
 from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
-import re
 
 # ---------------------------------------------------------
 # CONFIGURACIÓN DE PÁGINA Y ESTILOS
@@ -16,10 +15,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Estilo personalizado para arreglar contraste de tarjetas en tema oscuro
+# Estilos CSS corregidos para el tema oscuro sin cuadros blancos
 st.markdown("""
     <style>
-    /* Estilo de Tarjetas Métricas */
     div[data-testid="stMetric"] {
         background-color: #1E293B !important;
         border: 1px solid #334155 !important;
@@ -33,7 +31,7 @@ st.markdown("""
     }
     div[data-testid="stMetricValue"] > div {
         color: #F8FAFC !important;
-        font-size: 1.6rem !important;
+        font-size: 1.5rem !important;
         font-weight: 700 !important;
     }
     .stButton>button {
@@ -94,29 +92,37 @@ RUBROS_GASTOS = [
 
 RUBROS_INGRESOS = [
     "Sueldo", "Honorarios", "Cursos/Capacitaciones", "Comisiones",
-    "Productos Millanel", "Deposito abue", "Ahorros mes anterior", "Otros Ingresos"
+    "Productos Millanel", "Ventas", "Otros Ingresos"
 ]
 
 RUBROS_INVERSION = [
-    "Ahorro Reserva", "Inversión MEP/CEDEARs", "Fondo de Emergencia", "Seguro de Retiro"
+    "Ahorro", "Fondo de Emergencia", "Inversiones", "Seguro de retiro"
 ]
 
 CAJAS_DISPONIBLES = ["Banco Macro", "MercadoPago", "Banco Santa Fe", "Efectivo", "Broker / Inversiones"]
 
 # ---------------------------------------------------------
-# LIMPIEZA DE DATOS (CONVERSIÓN DE CADENAS A NÚMEROS)
+# FUNCIÓN DE LIMPIEZA DE NÚMEROS (CORRIGE 520.000 -> 520000)
 # ---------------------------------------------------------
 def limpiar_monto(val):
+    if val is None or val == "":
+        return 0.0
     if isinstance(val, (int, float)):
         return float(val)
-    if not val:
-        return 0.0
-    val_str = str(val).replace("$", "").replace("U$S", "").replace(" ", "").strip()
-    # Caso 1.234,56
+    
+    val_str = str(val).replace("$", "").replace("U$S", "").strip()
+    
+    # Manejo de formato argentino: 520.000,00 o 520.000
     if "." in val_str and "," in val_str:
         val_str = val_str.replace(".", "").replace(",", ".")
-    elif "," in val_str:
+    elif "." in val_str and "," not in val_str:
+        # Si tiene puntos pero no comas y hay 3 dígitos tras el punto, es separador de miles
+        partes = val_str.split(".")
+        if len(partes[-1]) == 3 and len(partes) > 1:
+            val_str = "".join(partes)
+    elif "," in val_str and "." not in val_str:
         val_str = val_str.replace(",", ".")
+        
     try:
         return float(val_str)
     except ValueError:
@@ -153,14 +159,13 @@ st.title("💰 Control Financiero")
 tab_carga, tab_dashboard, tab_cajas = st.tabs(["📝 Cargar Movimiento", "📊 Dashboard Mensual", "🏦 Saldos por Caja"])
 
 # ---------------------------------------------------------
-# TAB 1: FORMULARIO DE CARGA DINÁMICO
+# TAB 1: FORMULARIO DE CARGA
 # ---------------------------------------------------------
 with tab_carga:
     st.subheader("Registrar Operación")
     
     tc_defecto = obtener_tc_oficial()
     
-    # 1. Selección de Tipo fuera de columnas rígidas para actualizar desplegables al instante
     tipo_op = st.radio(
         "Tipo de Movimiento", 
         ["Gasto", "Ingreso", "Transferencia", "Ahorro / Inversión"], 
@@ -200,7 +205,7 @@ with tab_carga:
 
             concepto_op = st.text_input("Concepto / Detalle", placeholder="Ej. Cobro honorarios / Supermercado")
 
-        monto_ars = st.number_input("Monto en Pesos ($)", min_value=0.0, step=100.0, format="%.2f")
+        monto_ars = st.number_input("Monto en Pesos ($)", min_value=0.0, step=1000.0, format="%.2f")
         monto_usd = round(monto_ars / tc_aplicado, 2) if tc_aplicado > 0 else 0.0
         
         st.caption(f"Equivalente en USD: **US$ {monto_usd:,.2f}** (TC ${tc_aplicado:,.2f})")
