@@ -15,7 +15,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Estilos CSS corregidos para el tema oscuro sin cuadros blancos
+# Estilo visual de alto contraste
 st.markdown("""
     <style>
     div[data-testid="stMetric"] {
@@ -46,9 +46,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# CONEXIÓN A GOOGLE SHEETS Y API DÓLAR
+# CONEXIÓN A GOOGLE SHEETS
 # ---------------------------------------------------------
-@st.cache_resource
 def conectar_google_sheets():
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
@@ -62,7 +61,7 @@ def conectar_google_sheets():
     sheet = client.open("APP - Financiero mensual")
     return sheet
 
-@st.cache_data(ttl=1800)
+@st.cache_data(ttl=600)
 def obtener_tc_oficial():
     try:
         res = requests.get("https://dolarapi.com/v1/dolares/oficial", timeout=5)
@@ -82,7 +81,7 @@ except Exception as e:
     st.error(f"Error al conectar con Google Sheets: {e}")
 
 # ---------------------------------------------------------
-# LISTAS DE CONFIGURACIÓN
+# CONFIGURACIÓN DE RUBROS Y CAJAS
 # ---------------------------------------------------------
 RUBROS_GASTOS = [
     "Bancos (prestamos, tarjetas de credito)", "Auto", "Casa", "Comidas",
@@ -102,7 +101,7 @@ RUBROS_INVERSION = [
 CAJAS_DISPONIBLES = ["Banco Macro", "MercadoPago", "Banco Santa Fe", "Efectivo", "Broker / Inversiones"]
 
 # ---------------------------------------------------------
-# FUNCIÓN DE LIMPIEZA DE NÚMEROS (CORRIGE 520.000 -> 520000)
+# FUNCIÓN DE LIMPIEZA DE DATOS NUMÉRICOS
 # ---------------------------------------------------------
 def limpiar_monto(val):
     if val is None or val == "":
@@ -112,11 +111,9 @@ def limpiar_monto(val):
     
     val_str = str(val).replace("$", "").replace("U$S", "").strip()
     
-    # Manejo de formato argentino: 520.000,00 o 520.000
     if "." in val_str and "," in val_str:
         val_str = val_str.replace(".", "").replace(",", ".")
     elif "." in val_str and "," not in val_str:
-        # Si tiene puntos pero no comas y hay 3 dígitos tras el punto, es separador de miles
         partes = val_str.split(".")
         if len(partes[-1]) == 3 and len(partes) > 1:
             val_str = "".join(partes)
@@ -136,6 +133,20 @@ def cargar_datos():
     df_cajas = pd.DataFrame(raw_cajas)
     
     if not df_mov.empty:
+        # Estandarización de nombres de columnas
+        df_mov.columns = [str(c).strip() for c in df_mov.columns]
+        
+        # Mapeo flexible si la columna se llama 'Caja / Cuenta' o 'Caja_Origen'
+        if "Caja / Cuenta" in df_mov.columns and "Caja_Origen" not in df_mov.columns:
+            df_mov["Caja_Origen"] = df_mov["Caja / Cuenta"]
+            df_mov["Caja_Destino"] = "-"
+
+        if "Monto ($)" in df_mov.columns and "Monto_ARS" not in df_mov.columns:
+            df_mov["Monto_ARS"] = df_mov["Monto ($)"]
+
+        if "Monto (USD)" in df_mov.columns and "Monto_USD" not in df_mov.columns:
+            df_mov["Monto_USD"] = df_mov["Monto (USD)"]
+            
         df_mov["Fecha"] = pd.to_datetime(df_mov["Fecha"], errors='coerce')
         df_mov["Monto_ARS"] = df_mov["Monto_ARS"].apply(limpiar_monto)
         df_mov["Monto_USD"] = df_mov["Monto_USD"].apply(limpiar_monto)
@@ -277,11 +288,11 @@ with tab_cajas:
     
     saldos_dict = {c: 0.0 for c in CAJAS_DISPONIBLES}
     
-    if not df_saldos_base.empty and "Caja" in df_saldos_base.columns:
+    if not df_saldos_base.empty and "Caja / Cuenta" in df_saldos_base.columns:
         for _, r in df_saldos_base.iterrows():
-            caja_nombre = str(r.get("Caja", "")).strip()
+            caja_nombre = str(r.get("Caja / Cuenta", "")).strip()
             if caja_nombre in saldos_dict:
-                saldos_dict[caja_nombre] = limpiar_monto(r.get("Saldo_Inicial", 0.0))
+                saldos_dict[caja_nombre] = limpiar_monto(r.get("Saldo Inicial", 0.0))
                 
     if not df_movimientos.empty:
         for _, row in df_movimientos.iterrows():
