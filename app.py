@@ -80,6 +80,21 @@ RUBROS_GASTOS = [
     "Gastos Varios",
     "Regalos"
 ]
+RUBROS_INGRESOS = [
+    "Sueldo",
+    "Honorarios",
+    "Cursos/Capacitaciones",
+    "Comisiones",
+    "Productos Millanel",
+    "Ventas",
+    "Otros Ingresos"
+]
+RUBROS_INVERSION = [
+    "Ahorro",
+    "Fondo de Emergencia",
+    "Inversiones",
+    "Seguro de retiro",
+]
 
 RUBROS_INGRESOS = ["Sueldo", "Honorarios", "Cursos/Capacitaciones", "Comisiones", "Otros Ingresos"]
 RUBROS_INVERSION = ["Ahorro Reserva", "Inversión MEP/CEDEARs", "Fondo de Emergencia", "Seguro de Retiro"]
@@ -128,6 +143,10 @@ with tab_carga:
             fecha_op = st.date_input("Fecha", value=datetime.today())
             tipo_op = st.selectbox("Tipo de Movimiento", ["Gasto", "Ingreso", "Transferencia", "Ahorro / Inversión"])
         
+        # Tipo de Cambio del día por defecto, pero completamente editable por vos:
+        tc_defecto = obtener_tc_oficial()
+        tc_aplicado = st.number_input("Tipo de Cambio Oficial (Editable)", value=tc_defecto, step=1.0, format="%.2f")
+        
         with col2:
             if tipo_op == "Transferencia":
                 caja_origen = st.selectbox("Caja Origen (Resta)", CAJAS_DISPONIBLES)
@@ -149,9 +168,9 @@ with tab_carga:
             concepto_op = st.text_input("Concepto / Detalle", placeholder="Ej. Compras supermercado")
 
         monto_ars = st.number_input("Monto en Pesos ($)", min_value=0.0, step=100.0, format="%.2f")
-        monto_usd = round(monto_ars / tc_actual, 2) if tc_actual > 0 else 0.0
+        monto_usd = round(monto_ars / tc_aplicado, 2) if tc_aplicado > 0 else 0.0
         
-        st.caption(f"Equivalente en USD al guardar: **US$ {monto_usd:,.2f}**")
+        st.caption(f"Equivalente en USD al guardar (TC ${tc_aplicado:,.2f}): **US$ {monto_usd:,.2f}**")
         
         btn_guardar = st.form_submit_button("💾 Guardar Movimiento")
 
