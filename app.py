@@ -29,7 +29,10 @@ st.markdown("""
 @st.cache_resource
 def conectar_google_sheets():
     # Carga credenciales desde st.secrets o archivo local
-    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    scopes = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
     credentials = Credentials.from_service_account_info(
         st.secrets["gcp_service_account"],
         scopes=scopes
