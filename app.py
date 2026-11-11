@@ -101,7 +101,7 @@ RUBROS_INVERSION = [
 CAJAS_DISPONIBLES = ["Banco Macro", "MercadoPago", "Banco Santa Fe", "Efectivo", "Broker / Inversiones"]
 
 # ---------------------------------------------------------
-# FUNCIÓN DE LIMPIEZA DE DATOS NUMÉRICOS
+# FUNCIÓN DE LIMPIEZA NUMÉRICA AVANZADA
 # ---------------------------------------------------------
 def limpiar_monto(val):
     if val is None or val == "":
@@ -110,16 +110,32 @@ def limpiar_monto(val):
         return float(val)
     
     val_str = str(val).replace("$", "").replace("U$S", "").strip()
+    if not val_str:
+        return 0.0
     
-    if "." in val_str and "," in val_str:
-        val_str = val_str.replace(".", "").replace(",", ".")
-    elif "." in val_str and "," not in val_str:
+    # Manejar formatos con comas y puntos:
+    # Ejemplo 1: "2,683,881.23" (Formato inglés/Sheets por defecto)
+    # Ejemplo 2: "2.683.881,23" (Formato español)
+    if "," in val_str and "." in val_str:
+        if val_str.find(",") < val_str.find("."):
+            # Coma es miles, punto es decimal
+            val_str = val_str.replace(",", "")
+        else:
+            # Punto es miles, coma es decimal
+            val_str = val_str.replace(".", "").replace(",", ".")
+    elif "," in val_str:
+        # Solo coma: si hay dos decimales al final es coma decimal
+        partes = val_str.split(",")
+        if len(partes[-1]) in [1, 2]:
+            val_str = val_str.replace(",", ".")
+        else:
+            val_str = val_str.replace(",", "")
+    elif "." in val_str:
+        # Solo punto: verificar si es separador de miles
         partes = val_str.split(".")
         if len(partes[-1]) == 3 and len(partes) > 1:
             val_str = "".join(partes)
-    elif "," in val_str and "." not in val_str:
-        val_str = val_str.replace(",", ".")
-        
+            
     try:
         return float(val_str)
     except ValueError:
@@ -133,10 +149,8 @@ def cargar_datos():
     df_cajas = pd.DataFrame(raw_cajas)
     
     if not df_mov.empty:
-        # Estandarización de nombres de columnas
         df_mov.columns = [str(c).strip() for c in df_mov.columns]
         
-        # Mapeo flexible si la columna se llama 'Caja / Cuenta' o 'Caja_Origen'
         if "Caja / Cuenta" in df_mov.columns and "Caja_Origen" not in df_mov.columns:
             df_mov["Caja_Origen"] = df_mov["Caja / Cuenta"]
             df_mov["Caja_Destino"] = "-"
@@ -206,7 +220,7 @@ with tab_carga:
                 caja_destino = st.selectbox("Caja de Destino (Ingreso)", CAJAS_DISPONIBLES)
             elif tipo_op == "Ahorro / Inversión":
                 rubro_op = st.selectbox("Rubro de Inversión / Ahorro", RUBROS_INVERSION)
-                caja_destino = st.selectbox("Destino de Inversión", ["Broker / Inversiones", "MercadoPago Reserva", "Efectivo"])
+                caja_destino = st.selectbox("Destino de Inversión", ["Broker / Inversiones", "MercadoPago", "Efectivo"])
             elif tipo_op == "Transferencia":
                 rubro_op = "Transferencia entre Cuentas"
                 caja_destino = st.selectbox("Caja Destino (Suma)", [c for c in CAJAS_DISPONIBLES if c != caja_origen])
@@ -245,7 +259,7 @@ with tab_carga:
             st.rerun()
 
 # ---------------------------------------------------------
-# TAB 2: DASHBOARD MENSUAL
+# TAB 2: DASHBOARD MENSUAL Y DESGLOSE
 # ---------------------------------------------------------
 with tab_dashboard:
     if not df_movimientos.empty:
@@ -260,7 +274,7 @@ with tab_dashboard:
             
             tot_ingresos = df_mes[df_mes["Tipo"] == "Ingreso"]["Monto_ARS"].sum()
             tot_gastos = df_mes[df_mes["Tipo"] == "Gasto"]["Monto_ARS"].sum()
-            tot_ahorros = df_mes[df_mes["Tipo"] == "Ahorro / Inversión"]["Monto_ARS"].sum()
+            tot_ahorros = df_mes[df_mes["Tipo"].str.startswith("Ahorro")]["Monto_ARS"].sum()
             balance_neto = tot_ingresos - tot_gastos
             
             col_m1, col_m2, col_m3, col_m4 = st.columns(4)
@@ -270,7 +284,22 @@ with tab_dashboard:
             col_m4.metric("Ahorros e Inversiones", f"${tot_ahorros:,.2f}")
             
             st.divider()
-            st.subheader("Desglose de Gastos por Rubro")
+            
+            # DESGLOSE DE MOVIMIENTOS DEL MES
+            st.subheader("📜 Desglose de Movimientos Cargados en el Mes")
+            df_display = df_mes.copy()
+            df_display["Fecha"] = df_display["Fecha"].dt.strftime("%Y-%m-%d")
+            df_display["Monto_ARS_Form"] = df_display["Monto_ARS"].apply(lambda x: f"${x:,.2f}")
+            
+            st.dataframe(
+                df_display[[
+                    "Fecha", "Tipo", "Caja_Origen", "Caja_Destino", "Rubro", "Concepto", "Monto_ARS_Form"
+                ]].rename(columns={"Monto_ARS_Form": "Monto ($)"}),
+                use_container_width=True
+            )
+            
+            st.divider()
+            st.subheader("📊 Desglose de Gastos por Rubro")
             df_gastos_rubro = df_mes[df_mes["Tipo"] == "Gasto"].groupby("Rubro")["Monto_ARS"].sum().reset_index()
             if not df_gastos_rubro.empty:
                 df_gastos_rubro["Monto Formateado"] = df_gastos_rubro["Monto_ARS"].apply(lambda x: f"${x:,.2f}")
@@ -281,7 +310,7 @@ with tab_dashboard:
         st.info("No hay movimientos registrados para mostrar métricas.")
 
 # ---------------------------------------------------------
-# TAB 3: SALDOS POR CAJA
+# TAB 3: SALDOS POR CAJA Y RECONCILIACIÓN
 # ---------------------------------------------------------
 with tab_cajas:
     st.subheader("Estado de Cuentas y Disponibilidades")
@@ -305,7 +334,7 @@ with tab_cajas:
                 saldos_dict[c_dest] += monto
             elif tipo == "Gasto" and c_orig in saldos_dict:
                 saldos_dict[c_orig] -= monto
-            elif tipo in ["Ahorro / Inversión", "Transferencia"]:
+            elif tipo.startswith("Ahorro") or tipo == "Transferencia":
                 if c_orig in saldos_dict:
                     saldos_dict[c_orig] -= monto
                 if c_dest in saldos_dict:
