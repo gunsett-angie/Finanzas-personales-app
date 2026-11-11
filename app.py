@@ -101,7 +101,7 @@ RUBROS_INVERSION = [
 CAJAS_DISPONIBLES = ["Banco Macro", "MercadoPago", "Banco Santa Fe", "Efectivo", "Broker / Inversiones"]
 
 # ---------------------------------------------------------
-# FUNCIÓN DE LIMPIEZA NUMÉRICA AVANZADA
+# FUNCIÓN DE LIMPIEZA NUMÉRICA (ESTÁNDAR ARGENTINA: . miles, , decimales)
 # ---------------------------------------------------------
 def limpiar_monto(val):
     if val is None or val == "":
@@ -113,25 +113,14 @@ def limpiar_monto(val):
     if not val_str:
         return 0.0
     
-    # Manejar formatos con comas y puntos:
-    # Ejemplo 1: "2,683,881.23" (Formato inglés/Sheets por defecto)
-    # Ejemplo 2: "2.683.881,23" (Formato español)
-    if "," in val_str and "." in val_str:
-        if val_str.find(",") < val_str.find("."):
-            # Coma es miles, punto es decimal
-            val_str = val_str.replace(",", "")
-        else:
-            # Punto es miles, coma es decimal
-            val_str = val_str.replace(".", "").replace(",", ".")
-    elif "," in val_str:
-        # Solo coma: si hay dos decimales al final es coma decimal
-        partes = val_str.split(",")
-        if len(partes[-1]) in [1, 2]:
-            val_str = val_str.replace(",", ".")
-        else:
-            val_str = val_str.replace(",", "")
-    elif "." in val_str:
-        # Solo punto: verificar si es separador de miles
+    # 1. Ambos presentes: "2.683.881,23" -> punto es miles, coma es decimal
+    if "." in val_str and "," in val_str:
+        val_str = val_str.replace(".", "").replace(",", ".")
+    # 2. Solo coma: "520000,50" -> coma es decimal
+    elif "," in val_str and "." not in val_str:
+        val_str = val_str.replace(",", ".")
+    # 3. Solo punto: "2.683.881" o "520.000" -> si son bloques de miles se eliminan los puntos
+    elif "." in val_str and "," not in val_str:
         partes = val_str.split(".")
         if len(partes[-1]) == 3 and len(partes) > 1:
             val_str = "".join(partes)
@@ -140,6 +129,7 @@ def limpiar_monto(val):
         return float(val_str)
     except ValueError:
         return 0.0
+
 
 def cargar_datos():
     raw_mov = sheet_mov.get_all_records()
@@ -169,6 +159,7 @@ def cargar_datos():
         df_mov["Tipo"] = df_mov["Tipo"].astype(str).str.strip()
         
     return df_mov, df_cajas
+
 
 if conexion_ok:
     df_movimientos, df_saldos_base = cargar_datos()
